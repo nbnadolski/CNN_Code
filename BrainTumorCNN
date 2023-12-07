@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from google.colab import drive
 from keras.preprocessing.image import ImageDataGenerator
-from keras.layers import Input, Dense, Flatten
+from keras.layers import Input, Dense, Flatten, Reshape
 from keras.models import Model
 from keras.utils import to_categorical
 from keras.utils import plot_model
@@ -25,7 +25,7 @@ def load_image_data(folder_path):
         folder_path,
         target_size=(128, 128),  # Adjust the target size based on your requirements
         batch_size=32,
-        class_mode='categorical',  # Assuming a multi-class classification problem
+        class_mode='input',
         shuffle=True
     )
     return data_generator
@@ -51,8 +51,12 @@ flattened_img = Flatten()(input_img)
 encoded = Dense(120, activation='sigmoid', name='Encoder')(flattened_img)
 decoded = Dense(128 * 128 * 3, activation='sigmoid', name='Decoder')(encoded)
 
+print("Decoded Shape:", decoded.shape)
+
+reshaped_decoded = Reshape((128, 128, 3))(decoded)  # Ensure the output shape matches the input shape
+
 # Autoencoder model
-autoencoder = Model(input_img, decoded)
+autoencoder = Model(input_img, reshaped_decoded)
 encoder = Model(input_img, encoded)
 
 autoencoder.compile(optimizer='adam', loss='mean_squared_error')
