@@ -51,8 +51,6 @@ flattened_img = Flatten()(input_img)
 encoded = Dense(120, activation='sigmoid', name='Encoder')(flattened_img)
 decoded = Dense(128 * 128 * 3, activation='sigmoid', name='Decoder')(encoded)
 
-print("Decoded Shape:", decoded.shape)
-
 reshaped_decoded = Reshape((128, 128, 3))(decoded)  # Ensure the output shape matches the input shape
 
 # Autoencoder model
@@ -60,23 +58,22 @@ autoencoder = Model(input_img, reshaped_decoded)
 encoder = Model(input_img, encoded)
 
 autoencoder.compile(optimizer='adam', loss='mean_squared_error')
-autoencoder.summary()
 
 # Train the first autoencoder
 autoencoder.fit_generator(train_data_generator, epochs=100, shuffle=True)
+
+# Print the summary of the autoencoder
+autoencoder.summary()
 
 # Visualizing the weights of the first autoencoder
 n_cols = 10
 n_rows = int(np.ceil(120 / n_cols))
 fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 15))
 
-# Print the summary of the autoencoder
-autoencoder.summary()
-
 # Ensure that there are enough layers in the autoencoder
-if len(autoencoder.layers) > 1 and 'dense' in autoencoder.layers[1].name.lower():
-    # Access the weights of the Dense layer
-    w = autoencoder.layers[1].get_weights()[0]
+if len(autoencoder.layers) > 1 and 'dense' in autoencoder.layers[-1].name.lower():
+    # Access the weights of the Dense layer (last layer)
+    w = autoencoder.layers[-1].get_weights()[0]
 
     for i in range(min(120, w.shape[1])):
         # Reshape the weights to match the original image shape
@@ -84,13 +81,12 @@ if len(autoencoder.layers) > 1 and 'dense' in autoencoder.layers[1].name.lower()
         row = i // n_cols
         col = i % n_cols
         axes[row, col].imshow(w_i)
+        axes[row, col].set_title(f"Neuron {i}")
         axes[row, col].axis("off")
 
     plt.show()
 else:
     print("Autoencoder does not have a Dense layer as the second layer.")
-
-
 
 # Encoder architecture for the second autoencoder
 input_encoded = Input(shape=(120,))
@@ -102,20 +98,28 @@ autoencoder2 = Model(input_encoded, decoded2)
 encoder2 = Model(input_encoded, encoded2)
 
 autoencoder2.compile(optimizer='adam', loss='mean_squared_error')
+
+# Train the first autoencoder
+autoencoder2.fit_generator(train_data_generator, epochs=100, shuffle=True)
+
+# Print the summary of the autoencoder
 autoencoder2.summary()
 
 # Visualizing the weights of the second autoencoder
 n_cols2 = 5
 n_rows2 = int(np.ceil(40 / n_cols2))
 fig2, axes2 = plt.subplots(n_rows2, n_cols2, figsize=(15, 8))
+
 # Ensure that there are enough layers in the autoencoder
-if len(autoencoder.layers) > 1:
-  w = autoencoder2.layers[1].get_weights()[0]
+if len(autoencoder2.layers) > 1 and 'dense' in autoencoder2.layers[-1].name.lower():
+  # Access the weights of the Dense layer (last layer)
+  w = autoencoder2.layers[-1].get_weights()[0]
   for i in range(min(40, w.shape[1])):
       # Reshape the weights to match the original image shape
       w_i = w[:, i].reshape(128, 128, 3)
       row = i // n_cols2
       col = i % n_cols2
+      axes2[row, col].imshow(w_i)
       axes2[row, col].set_title(f"Neuron {i}")
       axes2[row, col].axis("off")
 
