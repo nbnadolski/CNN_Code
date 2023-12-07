@@ -1,45 +1,185 @@
-import requests
-from PIL import Image
-from io import BytesIO
 import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from google.colab import drive
+from keras.preprocessing.image import ImageDataGenerator
+from keras.layers import Input, Dense, Flatten
+from keras.models import Model
+from keras.utils import to_categorical
+from keras.utils import plot_model
 
-def download_images_from_github(repository_url, save_path):
-    # Ensure the save path exists
-    os.makedirs(save_path, exist_ok=True)
+# Load the training and testing data into memory.
+drive.mount('/content/drive', True)
 
-    # Fetch the file list from the GitHub repository
-    api_url = repository_url.replace("github.com", "api.github.com/repos") + "/contents/"
-    response = requests.get(api_url)
-    response.raise_for_status()
-    files = response.json()
+# Set up paths
+drive_path = '/content/drive/MyDrive/'  # Adjust the path based on your Google Drive folder structure
+main_folder = 'Colab Notebooks/BrainTumorsDataset'
+train_folder = 'Training'
+test_folder = 'Testing'
 
-    images = []
+# Function to load and preprocess image data
+def load_image_data(folder_path):
+    datagen = ImageDataGenerator(rescale=1./255)
+    data_generator = datagen.flow_from_directory(
+        folder_path,
+        target_size=(128, 128),  # Adjust the target size based on your requirements
+        batch_size=32,
+        class_mode='categorical',  # Assuming a multi-class classification problem
+        shuffle=True
+    )
+    return data_generator
 
-    for file_info in files:
-        if file_info["name"].endswith('.jpg') or file_info["name"].endswith('.jpeg'):
-            image_url = file_info["download_url"]
-            image_response = requests.get(image_url)
-            image_response.raise_for_status()
+# Load training and testing image data
+train_data_generator = load_image_data(os.path.join(drive_path, main_folder, train_folder))
+test_data_generator = load_image_data(os.path.join(drive_path, main_folder, test_folder))
 
-            # Convert the image content to a PIL Image
-            image = Image.open(BytesIO(image_response.content))
-            images.append(image)
+# Display some of the training images
+plt.figure(figsize=(12, 12))
+for i in range(20):
+    img, label = train_data_generator.next()
+    plt.subplot(4, 5, i+1)
+    plt.imshow(img[0])
+    plt.title(f"Class: {np.argmax(label[0])}")
+    plt.axis("off")
 
-            # Save the image to the specified directory
-            image.save(os.path.join(save_path, file_info["name"]))
+plt.show()
 
-    return images
+# Encoder architecture for the first autoencoder
+input_img = Input(shape=(128, 128, 3))  # Adjust the input shape based on your image properties
+flattened_img = Flatten()(input_img)
+encoded = Dense(120, activation='sigmoid', name='Encoder')(flattened_img)
+decoded = Dense(128 * 128 * 3, activation='sigmoid', name='Decoder')(encoded)
 
-if __name__ == "__main__":
-    # Replace with your GitHub repository URL
-    repository_url = "https://github.com/username/repository"
+# Autoencoder model
+autoencoder = Model(input_img, decoded)
+encoder = Model(input_img, encoded)
 
-    # Replace with the local directory to save images
-    save_path = "path/to/save/images"
+autoencoder.compile(optimizer='adam', loss='mean_squared_error')
+autoencoder.summary()
 
-    # Download images from GitHub
-    downloaded_images = download_images_from_github(repository_url, save_path)
+# Train the first autoencoder
+autoencoder.fit_generator(train_data_generator, epochs=100, shuffle=True)
 
+# Visualizing the weights of the first autoencoder
+n_cols = 10
+n_rows = int(np.ceil(120 / n_cols))
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 15))
 
-# Rest of code...
-# TODO: Imports, Data Input, Create CNN, Compute Accuracy, Confusion Matrix
+for i in range(120):
+    w = autoencoder.layers[1].get_weights()[0][:, i].reshape(128, 128, 3)
+    row = i // n_cols
+    col = i % n_cols
+    axes[row, col].imshow(w)
+    axes[row, col].axis("off")
+
+plt.show()
+
+# Encoder architecture for the second autoencoder
+input_encoded = Input(shape=(120,))
+encoded2 = Dense(40, activation='sigmoid', name='Encoder_2')(input_encoded)
+decoded2 = Dense(120, activation='sigmoid', name='Decoder_2')(encoded2)
+
+# Second autoencoder model
+autoencoder2 = Model(input_encoded, decoded2)
+encoder2 = Model(input_encoded, encoded2)
+
+autoencoder2.compile(optimizer='adam', loss='mean_squared_error')
+autoencoder2.summary()
+
+# Visualizing the weights of the second autoencoder
+n_cols2 = 5
+n_rows2 = int(np.ceil(40 / n_cols2))
+fig2, axes2 = plt.subplots(n_rows2, n_cols2, figsize=(15, 8))
+
+for i in range(40):
+    w = autoencoder2.layers[1].get_weights()[0][:, i].reshape(120, 1)
+    row = i // n_cols2
+    col = i % n_cols2
+    axes2[row, col].plot(w)
+    axes2[row, col].set_title(f"Neuron {i}")
+    axes2[row, col].axis("off")
+
+plt.show()
+
+# Softmax layer
+input_softmax = Input(shape=(40,))
+softmax_layer = Dense(10, activation='softmax', name='Softmax')(input_softmax)
+
+# Softmax model
+softnet = Model(input_softmax, softmax_layer)
+softnet.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Train the softmax layer
+softnet.fit(encoder2.predict(train_data_generator), to_categorical(train_data_generator.classes), epochs=100, batch_size=256, shuffle=True)
+
+# Viewing the structure of the softmax network
+plot_model(softnet, to_file='softmax_model.png', show_shapes=True, show_layer_names=True)
+
+# Visualizing the weights of the softmax layer
+n_cols_softmax = 5
+n_rows_softmax = int(np.ceil(10 / n_cols_softmax))
+fig_softmax, axes_softmax = plt.subplots(n_rows_softmax, n_cols_softmax, figsize=(15, 8))
+
+for i in range(10):
+    w = softnet.layers[1].get_weights()[0][:, i].reshape(40, 1)
+    row = i // n_cols_softmax
+    col = i % n_cols_softmax
+    axes_softmax[row, col].plot(w)
+    axes_softmax[row, col].set_title(f"Class {i}")
+    axes_softmax[row, col].set_xlabel('Neuron Index')
+    axes_softmax[row, col].set_ylabel('Weight Value')
+    axes_softmax[row, col].axis("off")
+
+plt.show()
+
+import seaborn as sn
+# Visualize Confusion Matrix
+# Adjust the heatmap size dynamically based on the number of classes
+def plot_confusion_matrix(y_classified, y_true, num_classes):
+    c_mat = np.zeros((num_classes, num_classes))
+    for i in range(len(y_true)):
+        c_mat[y_classified[i], y_true[i]] += 1
+
+    group_counts = ["{0:0.0f}".format(value) for value in c_mat.flatten()]
+    group_percentages = ["{0:.2%}".format(value) for value in c_mat.flatten() / np.sum(c_mat)]
+    labels = [f"{v1}\n{v2}" for v1, v2 in zip(group_counts, group_percentages)]
+    labels = np.asarray(labels).reshape(c_mat.shape[0], c_mat.shape[1])
+
+    accuracy = (np.sum(np.logical_and(y_classified, y_true)) / len(y_true)) * 100
+
+    plt.figure(figsize=(12, 10))
+    sn.heatmap(c_mat, annot=labels, fmt='', cmap='rocket_r')
+    plt.title("Confusion Matrix")
+    plt.ylabel('Output Class')
+    plt.xlabel(f'Target Class \n Accuracy: {accuracy:.2f}%')
+
+# Stacked model
+input_stacked = Input(shape=(128, 128, 3))  # Adjust the input shape based on your image properties
+flattened_stacked = Flatten()(input_stacked)
+stacked_layer1 = Dense(120, activation='sigmoid')(flattened_stacked)
+stacked_layer2 = Dense(40, activation='sigmoid')(stacked_layer1)
+stacked_output = Dense(10, activation='softmax')(stacked_layer2)
+
+stacked_ae = Model(input_stacked, stacked_output)
+stacked_ae.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+stacked_ae.summary()
+
+# Transfer the weights from the previously trained layers
+stacked_ae.layers[1].set_weights(autoencoder.layers[2].get_weights())
+stacked_ae.layers[2].set_weights(autoencoder2.layers[2].get_weights())
+stacked_ae.layers[3].set_weights(softnet.layers[1].get_weights())
+
+# Train the stacked model
+stacked_ae.fit_generator(train_data_generator, epochs=100, shuffle=True)
+
+# Evaluate the model on the test set
+evaluation_result = stacked_ae.evaluate_generator(test_data_generator)
+print("Test Accuracy:", evaluation_result[1])
+
+# View the results of the fine-tuning on the confusion matrix
+y_classified = np.argmax(stacked_ae.predict_generator(test_data_generator), axis=1)
+y_true = test_data_generator.classes
+plot_confusion_matrix(y_classified, y_true)
+
+drive.flush_and_unmount()
